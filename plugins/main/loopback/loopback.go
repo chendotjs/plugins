@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 
 	"github.com/vishvananda/netlink"
 
@@ -31,10 +32,16 @@ import (
 	bv "github.com/containernetworking/plugins/pkg/utils/buildversion"
 )
 
+var logfile *os.File
+
 func parseNetConf(bytes []byte) (*types.NetConf, error) {
 	conf := &types.NetConf{}
 	if err := json.Unmarshal(bytes, conf); err != nil {
 		return nil, fmt.Errorf("failed to parse network config: %v", err)
+	}
+
+	if str, err := json.MarshalIndent(conf, "", "  "); err == nil {
+		fmt.Fprintf(logfile, "parseNetConf: %+v\n\n", string(str))
 	}
 
 	if conf.RawPrevResult != nil {
@@ -53,6 +60,10 @@ func cmdAdd(args *skel.CmdArgs) error {
 	conf, err := parseNetConf(args.StdinData)
 	if err != nil {
 		return err
+	}
+
+	if str, err := json.MarshalIndent(conf, "", "  "); err == nil {
+		fmt.Fprintf(logfile, "lo cmdAdd: %+v\n\n", string(str))
 	}
 
 	var v4Addr, v6Addr *net.IPNet
@@ -104,6 +115,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	var result types.Result
 	if conf.PrevResult != nil {
+		if str, err := json.MarshalIndent(conf.PrevResult, "", "  "); err == nil {
+			fmt.Fprintf(logfile, "lo prevResult: %+v\n\n", string(str))
+		}
 		// If loopback has previous result which passes from previous CNI plugin,
 		// loopback should pass it transparently
 		result = conf.PrevResult
@@ -128,6 +142,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 
 		result = r
+
+		fmt.Fprintf(logfile, "lo prevResult is empty\n")
 	}
 
 	return types.PrintResult(result, conf.CNIVersion)
@@ -159,6 +175,13 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func main() {
+	var err error
+	logfile, err = os.Create("/tmp/lo.log")
+	if err != nil {
+		fmt.Println("cannot log")
+		os.Exit(-1)
+	}
+
 	skel.PluginMain(cmdAdd, cmdCheck, cmdDel, version.All, bv.BuildString("loopback"))
 }
 

@@ -1,0 +1,35 @@
+{
+  "cniVersion": "0.3.0",
+  "type": "loopback",
+  "name" : "chen",
+  "prevResult": {
+    "ips": [
+      {
+        "version": "4",
+        "address": "10.0.0.5/32",
+        "interface": 2
+      }
+    ],
+    "interfaces": [
+      {
+        "name": "cni0",
+        "mac": "00:11:22:33:44:55"
+      },
+      {
+        "name": "veth3243",
+        "mac": "55:44:33:22:11:11"
+      },
+      {
+        "name": "eth0",
+        "mac": "99:88:77:66:55:44",
+        "sandbox": "/var/run/netns/blue"
+      }
+    ],
+    "dns": {
+      "nameservers": [ "10.1.0.1" ]
+    }
+  }
+}
+
+
+
