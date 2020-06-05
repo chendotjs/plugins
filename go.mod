@@ -21,6 +21,7 @@ require (
 	github.com/onsi/ginkgo v0.0.0-20151202141238-7f8ab55aaf3b
 	github.com/onsi/gomega v0.0.0-20151007035656-2152b45fa28a
 	github.com/safchain/ethtool v0.0.0-20190326074333-42ed695e3de8
+	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.0.6 // indirect
 	github.com/stretchr/testify v1.3.0 // indirect
 	github.com/vishvananda/netlink v0.0.0-20181108222139-023a6dafdcdf
@@ -30,4 +31,6 @@ require (
 	golang.org/x/sys v0.0.0-20190616124812-15dcb6c0061f
 	gopkg.in/airbrake/gobrake.v2 v2.0.9 // indirect
 	gopkg.in/gemnasium/logrus-airbrake-hook.v2 v2.1.2 // indirect
+	k8s.io/klog v1.0.0 // indirect
+	k8s.io/klog/v2 v2.1.0
 )

@@ -15,6 +15,7 @@
 package allocator
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -24,6 +25,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend"
+	"github.com/containernetworking/plugins/plugins/ipam/host-local/logger"
 )
 
 type IPAllocator struct {
@@ -41,7 +43,7 @@ func NewIPAllocator(s *RangeSet, store backend.Store, id int) *IPAllocator {
 }
 
 // Get allocates an IP
-func (a *IPAllocator) Get(id string, ifname string, requestedIP net.IP) (*current.IPConfig, error) {
+func (a *IPAllocator) Get(ctx context.Context, id string, ifname string, requestedIP net.IP) (*current.IPConfig, error) {
 	a.store.Lock()
 	defer a.store.Unlock()
 
@@ -62,7 +64,7 @@ func (a *IPAllocator) Get(id string, ifname string, requestedIP net.IP) (*curren
 			return nil, fmt.Errorf("requested ip %s is subnet's gateway", requestedIP.String())
 		}
 
-		reserved, err := a.store.Reserve(id, ifname, requestedIP, a.rangeID)
+		reserved, err := a.store.Reserve(ctx, id, ifname, requestedIP, a.rangeID)
 		if err != nil {
 			return nil, err
 		}
@@ -86,28 +88,36 @@ func (a *IPAllocator) Get(id string, ifname string, requestedIP net.IP) (*curren
 
 		iter, err := a.GetIter()
 		if err != nil {
+			logger.Errorf(ctx, "failed to get iterator: %v", err)
 			return nil, err
 		}
 		for {
 			reservedIP, gw = iter.Next()
+			logger.Infof(ctx, "Allocator Get: try next reservedIP %v for container %v", reservedIP.String(), id)
 			if reservedIP == nil {
+				logger.Infof(ctx, "Allocator Get: next reservedIP for container %v is nil, will break", id)
 				break
 			}
-
-			reserved, err := a.store.Reserve(id, ifname, reservedIP.IP, a.rangeID)
+			logger.Infof(ctx, "Allocator Get: try to reserve IP %v for container %v", reservedIP.String(), id)
+			reserved, err := a.store.Reserve(ctx, id, ifname, reservedIP.IP, a.rangeID)
 			if err != nil {
+				logger.Errorf(ctx, "Allocator Get: failed to reserve IP %v for container %v: %v", reservedIP.String(), id, err)
 				return nil, err
 			}
 
 			if reserved {
+				logger.Infof(ctx, "Allocator Get: store reserved for IP %v successfully, will break", reservedIP.String())
 				break
 			}
 		}
 	}
 
 	if reservedIP == nil {
+		logger.Errorf(ctx, "no IP addresses available in range set: %s for container %s", a.rangeset.String(), id)
 		return nil, fmt.Errorf("no IP addresses available in range set: %s", a.rangeset.String())
 	}
+	logger.Infof(ctx, "Allocator Get: finally get reservedIP %v for container %v", reservedIP.String(), id)
+
 	version := "4"
 	if reservedIP.IP.To4() == nil {
 		version = "6"
@@ -121,11 +131,11 @@ func (a *IPAllocator) Get(id string, ifname string, requestedIP net.IP) (*curren
 }
 
 // Release clears all IPs allocated for the container with given ID
-func (a *IPAllocator) Release(id string, ifname string) error {
+func (a *IPAllocator) Release(ctx context.Context, id string, ifname string) error {
 	a.store.Lock()
 	defer a.store.Unlock()
 
-	return a.store.ReleaseByID(id, ifname)
+	return a.store.ReleaseByID(ctx, id, ifname)
 }
 
 type RangeIter struct {

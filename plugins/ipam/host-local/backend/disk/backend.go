@@ -15,6 +15,7 @@
 package disk
 
 import (
+	"context"
 	"io/ioutil"
 	"net"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend"
+	"github.com/containernetworking/plugins/plugins/ipam/host-local/logger"
 )
 
 const lastIPFilePrefix = "last_reserved_ip."
@@ -56,31 +58,53 @@ func New(network, dataDir string) (*Store, error) {
 	return &Store{lk, dir}, nil
 }
 
-func (s *Store) Reserve(id string, ifname string, ip net.IP, rangeID string) (bool, error) {
+func (s *Store) Reserve(ctx context.Context, id string, ifname string, ip net.IP, rangeID string) (bool, error) {
 	fname := GetEscapedPath(s.dataDir, ip.String())
 
+	logger.Infof(ctx, "Reserve: try to open file %v for container %v", fname, id)
 	f, err := os.OpenFile(fname, os.O_RDWR|os.O_EXCL|os.O_CREATE, 0644)
 	if os.IsExist(err) {
+		logger.Warningf(ctx, "Reserve: file %s exists for container %v: %v", fname, id, err)
 		return false, nil
 	}
 	if err != nil {
+		logger.Errorf(ctx, "Reserve: failed to open file %v for container %v: %v", fname, id, err)
 		return false, err
 	}
+	logger.Infof(ctx, "Reserve: open file %v for container %v successfully", fname, id)
+
+	logger.Infof(ctx, "Reserve: try to write file %v for container %v", fname, id)
 	if _, err := f.WriteString(strings.TrimSpace(id) + LineBreak + ifname); err != nil {
-		f.Close()
-		os.Remove(f.Name())
+		logger.Errorf(ctx, "Reserve: failed to write file %v for container %v: %v", fname, id, err)
+		if err := f.Close(); err != nil {
+			logger.Errorf(ctx, "Reserve: rollback: failed to close file %v for container %v: %v", fname, id, err)
+		}
+		if err := os.Remove(f.Name()); err != nil {
+			logger.Errorf(ctx, "Reserve: rollback: failed to remove file %v for container %v: %v", fname, id, err)
+		}
 		return false, err
 	}
+	logger.Infof(ctx, "Reserve: write file %v for container %v successfully", fname, id)
+
+	logger.Infof(ctx, "Reserve: try to close file %v for container %v", fname, id)
 	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
+		logger.Errorf(ctx, "Reserve: failed to close file %v for container %v: %v", fname, id, err)
+		if err := os.Remove(f.Name()); err != nil {
+			logger.Errorf(ctx, "Reserve: rollback: failed to remove file %v for container %v: %v", fname, id, err)
+		}
 		return false, err
 	}
+	logger.Infof(ctx, "Reserve: close file %v for container %v successfully", fname, id)
+
 	// store the reserved ip in lastIPFile
 	ipfile := GetEscapedPath(s.dataDir, lastIPFilePrefix+rangeID)
 	err = ioutil.WriteFile(ipfile, []byte(ip.String()), 0644)
 	if err != nil {
+		logger.Errorf(ctx, "Reserve: failed to write last_reserved_ip file %v for container %v: %v", ipfile, id, err)
 		return false, err
 	}
+
+	logger.Infof(ctx, "Reserve: reserve file %v for container %v successfully", fname, id)
 	return true, nil
 }
 
@@ -135,39 +159,46 @@ func (s *Store) FindByID(id string, ifname string) bool {
 	return found
 }
 
-func (s *Store) ReleaseByKey(id string, ifname string, match string) (bool, error) {
+func (s *Store) ReleaseByKey(ctx context.Context, id string, ifname string, match string) (bool, error) {
 	found := false
 	err := filepath.Walk(s.dataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
+			if err != nil {
+				logger.Errorf(ctx, "ReleaseByKey: error open path %v for container %v: %v", path, id, err)
+			}
 			return nil
 		}
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
+			logger.Errorf(ctx, "ReleaseByKey: error read file %v for container %v: %v", path, id, err)
 			return nil
 		}
 		if strings.TrimSpace(string(data)) == match {
+			logger.Infof(ctx, "ReleaseByKey: find file %v for container %v", path, id)
 			if err := os.Remove(path); err != nil {
+				logger.Errorf(ctx, "ReleaseByKey: failed to remove file %v for container %v: %v", path, id, err)
 				return nil
 			}
 			found = true
 		}
 		return nil
 	})
+	logger.Infof(ctx, "ReleaseByKey: returns found %v and err %v", found, err)
 	return found, err
 
 }
 
 // N.B. This function eats errors to be tolerant and
 // release as much as possible
-func (s *Store) ReleaseByID(id string, ifname string) error {
+func (s *Store) ReleaseByID(ctx context.Context, id string, ifname string) error {
 	found := false
 	match := strings.TrimSpace(id) + LineBreak + ifname
-	found, err := s.ReleaseByKey(id, ifname, match)
+	found, err := s.ReleaseByKey(ctx, id, ifname, match)
 
 	// For backwards compatibility, look for files written by a previous version
 	if !found && err == nil {
 		match := strings.TrimSpace(id)
-		found, err = s.ReleaseByKey(id, ifname, match)
+		found, err = s.ReleaseByKey(ctx, id, ifname, match)
 	}
 	return err
 }
